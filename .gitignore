@@ -1,0 +1,10 @@
+signing.p12
+*.p12
+*.jks
+*.keystore
+app/
+emu.sh
+build/
+.gradle/
+*.apk
+*.log

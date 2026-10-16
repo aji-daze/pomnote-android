@@ -1,0 +1,104 @@
+name: build-apk
+
+# main への push と手動実行だけで動く（よそのリポジトリからの pull request では動かさない＝署名鍵を渡さない）
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # リリース（APK の置き場）を作るためだけに使う
+    steps:
+      # 外部の部品は、すり替えられないようコミットの番号で固定する
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # 署名用の鍵は GitHub Secrets から復元する（鍵とパスワードはリポジトリに置かない）
+      - name: signing key
+        env:
+          SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+        run: printf '%s' "$SIGNING_KEYSTORE_B64" | base64 -d > signing.p12
+
+      - name: generate project
+        run: python3 generate.py
+
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: build
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: |
+          set -o pipefail
+          gradle --no-daemon assembleRelease 2>&1 | tee build.log
+          rm -f signing.p12
+
+      # 署名を検査し、APK の指紋（SHA-256）と署名証明書の指紋を控える（ダウンロードしたものが本物か確かめる用）
+      - name: inspect apk
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --verbose --print-certs "$APK" | tee verify.txt
+          {
+            echo "APK の SHA-256: $(sha256sum "$APK" | cut -d' ' -f1)"
+            grep -m1 'certificate SHA-256 digest' verify.txt | sed 's/.*digest: /署名証明書の SHA-256: /'
+          } > fingerprints.txt
+          cat fingerprints.txt | tee -a build.log
+          "$BT/aapt2" dump badging "$APK" | head -20 | tee -a build.log
+
+      - name: enable kvm
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # 本物の Android エミュレータにインストールして起動し、画面を撮る
+      - name: emulator test
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: bash emu.sh
+
+      - name: publish log
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=""
+          for f in build.log emu.log crash.log shot-app.png fingerprints.txt; do
+            if [ -f "$f" ]; then files="$files $f"; fi
+          done
+          gh release delete buildlog --yes --cleanup-tag || true
+          gh release create buildlog $files --prerelease --title buildlog --notes "build log" || true
+
+      - name: publish apk
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk pomnote.apk
+          {
+            echo "pomnote の Android アプリです。https://aji-daze.github.io/pomnote/ をアプリとして開きます。"
+            echo
+            cat fingerprints.txt
+          } > notes.txt
+          gh release create "build-${{ github.run_number }}" pomnote.apk \
+            --title "pomnote ${{ github.run_number }}" --notes-file notes.txt --latest
