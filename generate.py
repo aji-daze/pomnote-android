@@ -172,6 +172,7 @@ import android.view.View;
 import android.view.Window;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -191,6 +192,13 @@ public class MainActivity extends Activity {
         + "if(document.querySelector('#panel:not([hidden]),#bookView:not([hidden]),#dictView:not([hidden]),#readBar:not([hidden])')){"
         + "document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return true;}"
         + "return false;})()";
+
+    static final String OFFLINE_HTML = "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
+        + "<body style='margin:0;padding:48px 24px;background:#fbf9f3;color:#23211c;font-family:serif;line-height:1.8'>"
+        + "<h2 style='font-weight:600'>pomnote を開けませんでした</h2>"
+        + "<p>初めて開くときだけ、インターネットへの接続が必要です。Wi-Fi などにつないでから、もう一度読み込んでください。<br>"
+        + "一度開けば、次からはネットがなくても使えます。</p>"
+        + "<p><a href='" + BASE + "' style='display:inline-block;padding:12px 20px;border-radius:8px;background:#b5452b;color:#fff;text-decoration:none'>もう一度読み込む</a></p>";
 
     private WebView web;
     private ValueCallback<Uri[]> fileCallback;
@@ -226,6 +234,12 @@ public class MainActivity extends Activity {
                 if (isOwn(u)) return false;
                 openOutside(u);
                 return true;
+            }
+
+            // 初めて開くときにネットがないと、ページを保存できていないので開けない。案内を出す
+            @Override
+            public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
+                if (r.isForMainFrame()) v.loadDataWithBaseURL(null, OFFLINE_HTML, "text/html", "utf-8", null);
             }
         });
         web.setWebChromeClient(new WebChromeClient() {
@@ -340,9 +354,14 @@ APK=app/build/outputs/apk/release/app-release.apk
 {
   adb install -r "$APK"
   adb shell dumpsys package app.pomnote | grep -E "versionName|versionCode|targetSdk|minSdk|requested permissions|android.permission" | head -12
+  # エミュレータのネットがつながるまで待つ（最大2分）
+  for i in $(seq 1 24); do
+    adb shell ping -c 1 -W 3 aji-daze.github.io > /dev/null 2>&1 && { echo "network ready after $i tries"; break; }
+    sleep 5
+  done
   adb logcat -c
   adb shell am start -W -n app.pomnote/.MainActivity
-  sleep 25
+  sleep 30
   echo "pid: $(adb shell pidof app.pomnote)"
 } > emu.log 2>&1
 adb exec-out screencap -p > shot-app.png || true
