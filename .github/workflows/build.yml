@@ -84,7 +84,7 @@ jobs:
         run: |
           files=""
           for f in build.log emu.log crash.log shot-app.png fingerprints.txt; do
-            if [ -f "$f" ]; then files="$files $f"; fi
+            if [ -s "$f" ]; then files="$files $f"; fi   # 空のファイルはアップロードできないので飛ばす
           done
           gh release delete buildlog --yes --cleanup-tag || true
           gh release create buildlog $files --prerelease --title buildlog --notes "build log" || true
