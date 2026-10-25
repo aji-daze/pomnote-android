@@ -341,10 +341,18 @@ w(f"{RES}/values/colors.xml", r"""<?xml version="1.0" encoding="utf-8"?>
 </resources>
 """)
 
-# ランチャーアイコンは、公開中のアプリのアイコンをそのまま使う
-icon_path = os.path.join(ROOT, RES, "mipmap-xxxhdpi", "ic_launcher.png")
-os.makedirs(os.path.dirname(icon_path), exist_ok=True)
-urllib.request.urlretrieve(SITE + "icons/icon-192.png", icon_path)
+# ランチャーアイコンは、公開中のアプリのアイコンをそのまま使う。
+# Android 8 以降は、端末の形（丸・角丸など）に切り抜かれるアダプティブアイコン。
+# 前景には「端末が切り抜く前提」で絵を内側に収めた maskable-512.png を使う
+os.makedirs(os.path.join(ROOT, RES, "mipmap-xxxhdpi"), exist_ok=True)
+urllib.request.urlretrieve(SITE + "icons/icon-192.png", os.path.join(ROOT, RES, "mipmap-xxxhdpi", "ic_launcher.png"))
+urllib.request.urlretrieve(SITE + "icons/maskable-512.png", os.path.join(ROOT, RES, "mipmap-xxxhdpi", "ic_launcher_fg.png"))
+w(f"{RES}/mipmap-anydpi-v26/ic_launcher.xml", r"""<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/paper" />
+    <foreground android:drawable="@mipmap/ic_launcher_fg" />
+</adaptive-icon>
+""")
 
 # ---------------------------------------------------------------- emulator test
 # エミュレータ上で、インストール → 起動 → 画面撮影 までを試す（CI 用）
@@ -365,6 +373,11 @@ APK=app/build/outputs/apk/release/app-release.apk
   echo "pid: $(adb shell pidof app.pomnote)"
 } > emu.log 2>&1
 adb exec-out screencap -p > shot-app.png || true
+# アプリ一覧を開いて、アイコンの見え方を撮る
+adb shell input keyevent KEYCODE_HOME; sleep 2
+SIZE=$(adb shell wm size | grep -o '[0-9]*x[0-9]*' | tail -1); W=${SIZE%x*}; H=${SIZE#*x}
+adb shell input swipe $((W/2)) $((H*85/100)) $((W/2)) $((H*20/100)) 400; sleep 3
+adb exec-out screencap -p > shot-home.png || true
 adb logcat -d -b crash > crash.log 2>&1 || true
 adb logcat -d | grep -iE "chromium|pomnote|AndroidRuntime" | tail -80 >> emu.log || true
 """)
