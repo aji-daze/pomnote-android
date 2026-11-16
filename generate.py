@@ -231,7 +231,7 @@ public class MainActivity extends Activity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
                 Uri u = r.getUrl();
-                if (isOwn(u)) return false;
+                if (isOwn(u) || isSignIn(u)) return false;
                 openOutside(u);
                 return true;
             }
@@ -266,6 +266,14 @@ public class MainActivity extends Activity {
     static boolean isOwn(Uri u) {
         return u != null && "https".equals(u.getScheme()) && HOST.equals(u.getHost())
             && u.getPath() != null && u.getPath().startsWith(PATH);
+    }
+
+    // OneDrive につなぐときの Microsoft のサインイン画面。外のブラウザへ出すと、戻り先がこのアプリにならないので中で開く
+    static boolean isSignIn(Uri u) {
+        if (u == null || !"https".equals(u.getScheme()) || u.getHost() == null) return false;
+        String h = u.getHost();
+        return h.equals("login.microsoftonline.com") || h.equals("login.live.com") || h.equals("account.live.com")
+            || h.equals("signup.live.com") || h.equals("login.microsoft.com") || h.equals("account.microsoft.com");
     }
 
     // ほかのサイトは外のブラウザで開く。http(s)・メール以外の形式（intent: など）は開かない
